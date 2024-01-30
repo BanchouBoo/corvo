@@ -4,6 +4,28 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+uint8_t cursor_hidden = 0;
+char **titles = NULL;
+size_t titles_length = 0;
+char **classes = NULL;
+size_t classes_length = 0;
+char **instances = NULL;
+size_t instances_length = 0;
+xcb_window_t *window_ids = NULL;
+size_t window_ids_length = 0;
+
+#define APPEND(array, value, type)                                   \
+    do {                                                             \
+        array = realloc(array, (array##_length + 1) * sizeof(type)); \
+        if (array == NULL) {                                         \
+            fprintf(stderr, "Memory allocation failure!\n");         \
+            exit(EXIT_FAILURE);                                      \
+        }                                                            \
+        array[array##_length] = value;                               \
+        array##_length++;                                            \
+    } while (0)
 
 xcb_atom_t intern_atom(xcb_connection_t *conn, const char *atom) {
     xcb_atom_t result = XCB_NONE;
@@ -29,42 +51,199 @@ char *get_title(xcb_connection_t *conn, xcb_window_t window) {
     xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_NAME, XCB_ATOM_ANY, 0, -1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
     const char *source_title = (char*)xcb_get_property_value(reply);
-    size_t length = strlen(source_title);
+
+    size_t length = xcb_get_property_value_length(reply);
+    if (length == 0) {
+        free(reply);
+        return "";
+    }
+
     char *title = (char*)malloc(length * sizeof(char));
     memcpy(title, source_title, length);
+    title[length] = '\0';
     free(reply);
     return title;
 }
 
-void update_cursor(xcb_connection_t *conn, xcb_window_t window, char *title, char *titles[], int title_count) {
-    for (int i = 1; i < title_count; i++) {
-        const char* t = titles[i];
-        if (strcmp(title, t) == 0) {
-            xcb_xfixes_hide_cursor(conn, window);
-            xcb_flush(conn);
-            return;
+char *get_class(xcb_connection_t *conn, xcb_window_t window) {
+    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_ANY, 0, -1);
+    xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
+    const char *source_class = (char*)xcb_get_property_value(reply);
+
+    size_t length = 0;
+    while (source_class[length]) length++;
+    if (length == 0) {
+        free(reply);
+        return "";
+    }
+
+    char *class = (char*)malloc(length * sizeof(char));
+    memcpy(class, source_class, length);
+    class[length] = '\0';
+    free(reply);
+    return class;
+}
+
+char *get_instance(xcb_connection_t *conn, xcb_window_t window) {
+    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_ANY, 0, -1);
+    xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
+    const char *source_class = (char*)xcb_get_property_value(reply);
+
+    size_t start = 0;
+    while (source_class[start]) start++;
+    start++;
+
+    const char *source_instance = &source_class[start];
+    size_t length = 0;
+    while (source_class[length]) length++;
+    if (length == 0) {
+        free(reply);
+        return "";
+    }
+
+    char *instance = (char*)malloc(length * sizeof(char));
+    memcpy(instance, source_instance, length);
+    instance[length] = '\0';
+    free(reply);
+    return instance;
+}
+
+void hide_cursor(xcb_connection_t *conn, xcb_window_t root_window) {
+    if (!cursor_hidden) {
+        xcb_xfixes_hide_cursor(conn, root_window);
+        xcb_flush(conn);
+    }
+    cursor_hidden = 1;
+}
+
+void show_cursor(xcb_connection_t *conn, xcb_window_t root_window) {
+    if (cursor_hidden) {
+        xcb_xfixes_show_cursor(conn, root_window);
+        xcb_flush(conn);
+    }
+    cursor_hidden = 0;
+}
+
+void update_cursor(xcb_connection_t *conn, xcb_window_t root_window, xcb_window_t window) {
+    uint8_t success = 0;
+    if (titles_length > 0) {
+        char *title = get_title(conn, window);
+        for (size_t i = 0; i < titles_length; i++) {
+            const char* value = titles[i];
+            if (strcmp(title, value) == 0) {
+                hide_cursor(conn, root_window);
+                success = 1;
+            }
+        }
+        if (title[0]) {
+            free(title);
         }
     }
-    xcb_xfixes_show_cursor(conn, window);
-    xcb_flush(conn);
+    if (success) return;
+
+    if (classes_length > 0) {
+        char *class = get_class(conn, window);
+        for (size_t i = 0; i < classes_length; i++) {
+            const char* value = classes[i];
+            if (strcmp(class, value) == 0) {
+                hide_cursor(conn, root_window);
+                success = 1;
+            }
+        }
+        if (class[0]) {
+            free(class);
+        }
+    }
+    if (success) return;
+
+    if (instances_length > 0) {
+        char *instance = get_instance(conn, window);
+        for (size_t i = 0; i < instances_length; i++) {
+            const char* value = instances[i];
+            if (strcmp(instance, value) == 0) {
+                hide_cursor(conn, root_window);
+                success = 1;
+            }
+        }
+        if (instance[0]) {
+            free(instance);
+        }
+    }
+    if (success) return;
+
+    if (window_ids_length > 0) {
+        for (size_t i = 0; i < window_ids_length; i++) {
+            const xcb_window_t value = window_ids[i];
+            if (window == value) {
+                hide_cursor(conn, root_window);
+                return;
+            }
+        }
+    }
+
+    show_cursor(conn, root_window);
+}
+
+void print_help(int exit_code) {
+    fprintf(stderr, "corvo: [CONDITIONS]\n");
+    fprintf(stderr, "  -h             print this help and exit\n\n");
+
+    fprintf(stderr, "  CONDITIONS:\n");
+    fprintf(stderr, "    -t TITLE     hide the cursor on windows with TITLE as their window title (WM_NAME)\n");
+    fprintf(stderr, "    -c CLASS     hide the cursor on windows with CLASS as their class value (first value in WM_CLASS)\n");
+    fprintf(stderr, "    -i INSTANCE  hide the cursor on windows with INSTANCE as their class value (second value in WM_CLASS)\n");
+    fprintf(stderr, "    -w WINDOW    hide the cursor on the window with the ID WINDOW\n");
+
+    exit(exit_code);
 }
 
 int main(int argc, char *argv[]) {
-    if (argc == 1) {
-        fprintf(stderr, "Must include at least one window title as an argument!\n");
-        exit(EXIT_FAILURE);
+    char opt = 0;
+    while ((opt = getopt(argc, argv, "ht:c:i:w:")) != -1) {
+        switch (opt) {
+            case 'h': {
+                print_help(EXIT_SUCCESS);
+            } break;
+            case 't': {
+                APPEND(titles, optarg, char *);
+            } break;
+            case 'c': {
+                APPEND(classes, optarg, char *);
+            } break;
+            case 'i': {
+                APPEND(instances, optarg, char *);
+            } break;
+            case 'w': {
+                xcb_window_t id = strtol(optarg, NULL, 0);
+                if (id == XCB_WINDOW_NONE) {
+                    fprintf(stderr, "Unable to parse window ID '%s'!\n", optarg);
+                    return EXIT_FAILURE;
+                }
+                APPEND(window_ids, id, xcb_window_t);
+            } break;
+            case '?': {
+                print_help(EXIT_FAILURE);
+            } break;
+        }
+    }
+
+    size_t total_length = titles_length + classes_length + instances_length + window_ids_length;
+    if (total_length == 0) {
+        fprintf(stderr, "Must pass in at least one condition!\n");
+        print_help(EXIT_FAILURE);
     }
 
     xcb_connection_t *conn;
 
-    if (xcb_connection_has_error(conn = xcb_connect(NULL, NULL)))
+    if (xcb_connection_has_error(conn = xcb_connect(NULL, NULL))) {
         return 0;
+    }
 
     xcb_atom_t active_window = intern_atom(conn, "_NET_ACTIVE_WINDOW");
 
     if (active_window == XCB_NONE) {
         fprintf(stderr, "_NET_ACTIVE_WINDOW atom not found!");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(conn)).data;
@@ -79,22 +258,17 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,
                 "Xfixes version 4.0 or greater required, you have %d.%d\n",
                 xfixes_reply->major_version, xfixes_reply->minor_version);
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
     
-    do {
-        xcb_window_t window = get_active_window(conn, screen->root, active_window);
-        char *title = get_title(conn, window);
-        update_cursor(conn, screen->root, title, argv, argc);
-        free(title);
-    } while (0);
+    update_cursor(conn, screen->root, get_active_window(conn, screen->root, active_window));
 
     while (1) {
         xcb_generic_event_t *ev;
         ev = xcb_wait_for_event(conn);
         if (!ev) {
             fprintf(stderr, "Error in xcb event loop!");
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
 
         switch (ev->response_type & ~0x80) {
@@ -102,9 +276,7 @@ int main(int argc, char *argv[]) {
                 xcb_property_notify_event_t *e = (xcb_property_notify_event_t *)ev;
                 if (e->atom == active_window) {
                     xcb_window_t window = get_active_window(conn, screen->root, active_window);
-                    char *title = get_title(conn, window);
-                    update_cursor(conn, screen->root, title, argv, argc);
-                    free(title);
+                    update_cursor(conn, screen->root, window);
                 }
             } break;
         }
