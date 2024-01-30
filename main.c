@@ -42,7 +42,12 @@ xcb_atom_t intern_atom(xcb_connection_t *conn, const char *atom) {
 xcb_window_t get_active_window(xcb_connection_t *conn, xcb_window_t window, xcb_atom_t atom) {
     xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, atom, XCB_ATOM_WINDOW, 0, 1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
-    xcb_window_t result = *(xcb_window_t*)xcb_get_property_value(reply);
+    xcb_window_t result;
+    if (reply->length == 0) {
+        result = XCB_WINDOW_NONE;
+    } else {
+        result = *(xcb_window_t*)xcb_get_property_value(reply);
+    }
     free(reply);
     return result;
 }
@@ -125,6 +130,11 @@ void show_cursor(xcb_connection_t *conn, xcb_window_t root_window) {
 }
 
 void update_cursor(xcb_connection_t *conn, xcb_window_t root_window, xcb_window_t window) {
+    if (window == XCB_WINDOW_NONE) {
+        show_cursor(conn, root_window);
+        return;
+    }
+
     uint8_t success = 0;
     if (titles_length > 0) {
         char *title = get_title(conn, window);
