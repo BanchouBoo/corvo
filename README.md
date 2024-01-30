@@ -20,8 +20,10 @@ corvo: [CONDITIONS]
 ## build
 
 Dependencies
+
 - `xcb`
 - `xcb-xfixes`
+
 Then just run `make` to build the binary in the project folder and `make install` to install it to the `bin` folder in the specified prefix (default `/usr/local`)
 
 ## caveats
