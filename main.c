@@ -6,16 +6,6 @@
 #include <string.h>
 #include <unistd.h>
 
-uint8_t cursor_hidden = 0;
-char **titles = NULL;
-size_t titles_length = 0;
-char **classes = NULL;
-size_t classes_length = 0;
-char **instances = NULL;
-size_t instances_length = 0;
-xcb_window_t *window_ids = NULL;
-size_t window_ids_length = 0;
-
 #define APPEND(array, value, type)                                   \
     do {                                                             \
         array = realloc(array, (array##_length + 1) * sizeof(type)); \
@@ -27,10 +17,24 @@ size_t window_ids_length = 0;
         array##_length++;                                            \
     } while (0)
 
+// We track the cursor state manually because hiding the cursor seems to stack
+// e.g. if you hide the cursor twice with xcb_xfixes_hide_cursor you have to
+//      call xcb_xfixes_show_cursor twice
+uint8_t cursor_hidden = 0;
+
+char **titles = NULL;
+size_t titles_length = 0;
+char **classes = NULL;
+size_t classes_length = 0;
+char **instances = NULL;
+size_t instances_length = 0;
+xcb_window_t *window_ids = NULL;
+size_t window_ids_length = 0;
+
 xcb_atom_t intern_atom(xcb_connection_t *conn, const char *atom) {
     xcb_atom_t result = XCB_NONE;
-    xcb_intern_atom_reply_t *reply =
-        xcb_intern_atom_reply(conn, xcb_intern_atom(conn, 0, strlen(atom), atom), NULL);
+    xcb_intern_atom_cookie_t cookie = xcb_intern_atom(conn, 0, strlen(atom), atom);
+    xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(conn, cookie, NULL);
     if (reply) {
         result = reply->atom;
     }
@@ -42,10 +46,8 @@ xcb_atom_t intern_atom(xcb_connection_t *conn, const char *atom) {
 xcb_window_t get_active_window(xcb_connection_t *conn, xcb_window_t window, xcb_atom_t atom) {
     xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, atom, XCB_ATOM_WINDOW, 0, 1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
-    xcb_window_t result;
-    if (reply->length == 0) {
-        result = XCB_WINDOW_NONE;
-    } else {
+    xcb_window_t result = XCB_WINDOW_NONE;
+    if (reply->length > 0) {
         result = *(xcb_window_t*)xcb_get_property_value(reply);
     }
     free(reply);
