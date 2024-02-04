@@ -53,62 +53,32 @@ xcb_window_t get_active_window(xcb_connection_t *conn, xcb_window_t window, xcb_
 }
 
 char *get_title(xcb_connection_t *conn, xcb_window_t window) {
-    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_NAME, XCB_ATOM_ANY, 0, -1);
+    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 0, -1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
     const char *source_title = (char*)xcb_get_property_value(reply);
 
-    size_t length = xcb_get_property_value_length(reply);
-    if (length == 0) {
-        free(reply);
-        return "";
-    }
-
-    char *title = (char*)malloc(length * sizeof(char));
-    memcpy(title, source_title, length);
-    title[length] = '\0';
+    char *title = strdup(source_title);
     free(reply);
     return title;
 }
 
 char *get_class(xcb_connection_t *conn, xcb_window_t window) {
-    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_ANY, 0, -1);
+    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, -1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
     const char *source_class = (char*)xcb_get_property_value(reply);
 
-    size_t length = 0;
-    while (source_class[length]) length++;
-    if (length == 0) {
-        free(reply);
-        return "";
-    }
-
-    char *class = (char*)malloc(length * sizeof(char));
-    memcpy(class, source_class, length);
-    class[length] = '\0';
+    char *class = strdup(source_class);
     free(reply);
     return class;
 }
 
 char *get_instance(xcb_connection_t *conn, xcb_window_t window) {
-    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_ANY, 0, -1);
+    xcb_get_property_cookie_t cookie = xcb_get_property(conn, 0, window, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 0, -1);
     xcb_get_property_reply_t *reply = xcb_get_property_reply(conn, cookie, NULL);
     const char *source_class = (char*)xcb_get_property_value(reply);
 
-    size_t start = 0;
-    while (source_class[start]) start++;
-    start++;
-
-    const char *source_instance = &source_class[start];
-    size_t length = 0;
-    while (source_class[length]) length++;
-    if (length == 0) {
-        free(reply);
-        return "";
-    }
-
-    char *instance = (char*)malloc(length * sizeof(char));
-    memcpy(instance, source_instance, length);
-    instance[length] = '\0';
+    const char *source_instance = &source_class[strlen(source_class) + 1];
+    char *instance = strdup(source_instance);
     free(reply);
     return instance;
 }
@@ -143,13 +113,12 @@ void update_cursor(xcb_connection_t *conn, xcb_window_t root_window, xcb_window_
             if (strcmp(title, value) == 0) {
                 hide_cursor(conn, root_window);
                 success = 1;
+                break;
             }
         }
-        if (title[0]) {
-            free(title);
-        }
+        free(title);
+        if (success) return;
     }
-    if (success) return;
 
     if (classes_length > 0) {
         char *class = get_class(conn, window);
@@ -158,13 +127,12 @@ void update_cursor(xcb_connection_t *conn, xcb_window_t root_window, xcb_window_
             if (strcmp(class, value) == 0) {
                 hide_cursor(conn, root_window);
                 success = 1;
+                break;
             }
         }
-        if (class[0]) {
-            free(class);
-        }
+        free(class);
+        if (success) return;
     }
-    if (success) return;
 
     if (instances_length > 0) {
         char *instance = get_instance(conn, window);
@@ -173,13 +141,12 @@ void update_cursor(xcb_connection_t *conn, xcb_window_t root_window, xcb_window_
             if (strcmp(instance, value) == 0) {
                 hide_cursor(conn, root_window);
                 success = 1;
+                break;
             }
         }
-        if (instance[0]) {
-            free(instance);
-        }
+        free(instance);
+        if (success) return;
     }
-    if (success) return;
 
     if (window_ids_length > 0) {
         for (size_t i = 0; i < window_ids_length; i++) {
@@ -258,7 +225,7 @@ int main(int argc, char *argv[]) {
 
     xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(conn)).data;
 
-    uint32_t values[] = { XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_FOCUS_CHANGE };
+    uint32_t values[] = { XCB_EVENT_MASK_PROPERTY_CHANGE };
     xcb_change_window_attributes(conn, screen->root, XCB_CW_EVENT_MASK, values);
     xcb_flush(conn);
 
@@ -274,8 +241,7 @@ int main(int argc, char *argv[]) {
     update_cursor(conn, screen->root, get_active_window(conn, screen->root, active_window));
 
     while (1) {
-        xcb_generic_event_t *ev;
-        ev = xcb_wait_for_event(conn);
+        xcb_generic_event_t *ev = xcb_wait_for_event(conn);
         if (!ev) {
             fprintf(stderr, "Error in xcb event loop!");
             return EXIT_FAILURE;
